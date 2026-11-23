@@ -5,6 +5,9 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from scipy.optimize import minimize
+from pathlib import Path
+from datetime import datetime, timezone
+from data_loader import download_daily_prices
 
 # Use a wide layout so charts and tables have more space.
 st.set_page_config(page_title="FinPilot Robo-Advisor", layout="wide")
@@ -51,15 +54,51 @@ asset_codes = {
     "Short-Term Treasury ETF (SHY)": "SHY"
 }
 
-# Read saved prices and use the first column as dates.
-prices = pd.read_csv(
-    "data/prices.csv",
+# Keep the original CSV as the default and fallback dataset.
+demo_prices = pd.read_csv(
+    Path(__file__).parent / "data" / "prices.csv",
     index_col=0,
     parse_dates=True
 )
 
+# Download only when this button is clicked, not on every input change.
+refresh_clicked = st.sidebar.button("Update Daily Data", key="refresh_daily")
+st.sidebar.caption(
+    "Download daily prices before today's US market date. "
+    "The saved CSV is not changed."
+)
+
+if refresh_clicked:
+    try:
+        with st.spinner("Downloading daily prices..."):
+            new_prices = download_daily_prices(tuple(asset_codes.values()))
+        st.session_state["updated_daily_prices"] = new_prices
+        st.session_state["daily_update_time"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+        st.sidebar.success("Daily data loaded. Results have been recalculated.")
+    except Exception as error:
+        # Fall back to demo data if the request fails or data is incomplete.
+        st.session_state.pop("updated_daily_prices", None)
+        st.session_state.pop("daily_update_time", None)
+        st.sidebar.warning("Update failed. Using the saved CSV data.")
+        with st.sidebar.expander("Update details"):
+            st.write(str(error))
+
+# Keep successful downloads during input changes in this browser session.
+if "updated_daily_prices" in st.session_state:
+    prices = st.session_state["updated_daily_prices"]
+    st.caption(
+        "Source: Yahoo Finance via yfinance. Updated daily data. "
+        f"Retrieved: {st.session_state['daily_update_time']}"
+    )
+else:
+    prices = demo_prices
+    st.caption("Source: Yahoo Finance via yfinance. Saved CSV data.")
+
 st.caption(
-    "Source: Yahoo Finance via yfinance. Loaded from a local CSV file."
+    "Daily data is not live pricing. Today's US market date is excluded; "
+    "weekends and holidays may have no newer prices."
 )
 
 st.caption(
