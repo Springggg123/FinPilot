@@ -140,9 +140,9 @@ with market_tab:
     daily_returns = prices[ticker].pct_change(fill_method=None).dropna()
 
     with st.expander("View daily returns"):
-        st.subheader("Daily Returns (First 5 Observations)")
+        st.subheader("Daily Returns (Latest 5 Observations)")
         st.dataframe(
-            (daily_returns.head() * 100).to_frame("Daily Return (%)")
+            (daily_returns.tail() * 100).to_frame("Daily Return (%)")
         )
 
     # Convert daily volatility to an annual estimate using 252 trading days.
