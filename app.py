@@ -1,3 +1,4 @@
+# Import the tools used for the dashboard and calculations.
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,12 +6,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from scipy.optimize import minimize
 
+# Use a wide layout so charts and tables have more space.
 st.set_page_config(page_title="FinPilot Robo-Advisor", layout="wide")
 
 st.title("FinPilot Robo-Advisor")
 st.write("Explore historical asset performance, risk, and clustering.")
 st.sidebar.header("Investment Settings")
 
+# Get the investment amount from the user.
 investment_amount = st.sidebar.number_input(
     "Investment Amount (USD)",
     min_value=100.0,
@@ -22,6 +25,7 @@ investment_amount = st.sidebar.number_input(
 st.sidebar.caption(
     "This amount will be used to calculate the allocation in USD."
 )
+# Let the user choose a risk preference.
 risk_preference = st.sidebar.selectbox(
     "Risk Preference",
     ["Conservative", "Balanced", "Growth"]
@@ -31,6 +35,7 @@ st.sidebar.caption(
     "Conservative prioritizes lower volatility. "
     "Balanced and Growth place increasing emphasis on estimated returns."
 )
+# Match each display name to its asset code.
 asset_codes = {
     "Apple (AAPL)": "AAPL",
     "Microsoft (MSFT)": "MSFT",
@@ -46,6 +51,7 @@ asset_codes = {
     "Short-Term Treasury ETF (SHY)": "SHY"
 }
 
+# Read saved prices and use the first column as dates.
 prices = pd.read_csv(
     "data/prices.csv",
     index_col=0,
@@ -62,16 +68,20 @@ st.caption(
     f"Trading days: {len(prices)} | Assets: {len(prices.columns)}"
 )
 
+# Create four tabs. All tab code still runs when the app reruns.
 market_tab, ai_tab, portfolio_tab, test_tab = st.tabs([
     "Market Overview", "AI Clustering", "Portfolio Builder", "Performance Test"
 ])
 
+# 1. Show historical prices, returns, and volatility.
 with market_tab:
     asset = st.selectbox("Select an asset", list(asset_codes.keys()))
+    # Get the code for the selected asset.
     ticker = asset_codes[asset]
 
     st.write("Selected asset:", asset)
 
+    # Keep detailed data inside a section the user can open.
     with st.expander("View price data"):
         st.subheader(f"{ticker} Historical Adjusted Closing Prices")
         st.dataframe(prices[[ticker]].head())
@@ -80,12 +90,14 @@ with market_tab:
     st.line_chart(prices[ticker])
     st.caption("Y-axis: Adjusted closing price (USD). X-axis: Date.")
 
+    # Compare the last price with the first price to find total return.
     start_price = prices[ticker].iloc[0]
     end_price = prices[ticker].iloc[-1]
     total_return = (end_price / start_price - 1) * 100
 
     st.metric("Cumulative Return", f"{total_return:.2f}%")
 
+    # Calculate daily percentage changes as decimals and remove empty values.
     daily_returns = prices[ticker].pct_change(fill_method=None).dropna()
 
     with st.expander("View daily returns"):
@@ -94,20 +106,25 @@ with market_tab:
             (daily_returns.head() * 100).to_frame("Daily Return (%)")
         )
 
+    # Convert daily volatility to an annual estimate using 252 trading days.
     annual_volatility = daily_returns.std() * (252 ** 0.5)
     st.metric("Annualized Volatility", f"{annual_volatility:.2%}")
 
     st.subheader("Asset Performance Comparison (Base = 100)")
 
+    # Keep only dates with prices for every asset.
     comparison_prices = prices.dropna()
+    # Set every starting price to 100 for a fair performance comparison.
     normalized_prices = (
         comparison_prices / comparison_prices.iloc[0] * 100
     )
 
     st.line_chart(normalized_prices)
 
+    # Calculate daily returns for all assets.
     all_returns = comparison_prices.pct_change(fill_method=None).dropna()
 
+    # Build a table of historical return and volatility for each asset.
     summary = pd.DataFrame({
         "Cumulative Return (%)": (
             comparison_prices.iloc[-1] / comparison_prices.iloc[0] - 1
@@ -120,9 +137,12 @@ with market_tab:
     st.subheader("Asset Return and Risk Comparison")
     st.dataframe(summary.round(2))
 
+# 2. Group assets by their historical return and volatility.
 with ai_tab:
+    # Use both columns in the summary as clustering features.
     features = summary.copy()
 
+    # Put the two features on comparable scales before clustering.
     scaler = StandardScaler()
     scaled_features = scaler.fit_transform(features)
 
@@ -144,13 +164,16 @@ with ai_tab:
             "Negative values indicate observations below the feature mean."
         )
 
+    # Use three groups, a fixed random seed, and ten starting attempts.
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+    # Fit K-Means and get a group number for each asset.
     cluster_labels = kmeans.fit_predict(scaled_features)
 
     cluster_result = summary.copy()
     cluster_result["Cluster ID"] = cluster_labels
 
 
+    # Calculate the average return and volatility in each group.
     cluster_summary = cluster_result.groupby("Cluster ID")[
         ["Cumulative Return (%)", "Annualized Volatility (%)"]
     ].mean()
@@ -160,6 +183,7 @@ with ai_tab:
         "Mean Annualized Volatility (%)"
     ]
 
+    # Count how many assets belong to each group.
     cluster_summary["Number of Assets"] = (
         cluster_result.groupby("Cluster ID").size()
     )
@@ -167,10 +191,12 @@ with ai_tab:
     st.subheader("Cluster Summary")
     st.dataframe(cluster_summary.round(2))
 
+    # Rank groups by average volatility; group numbers have no risk order.
     cluster_order = cluster_summary[
         "Mean Annualized Volatility (%)"
     ].sort_values().index
 
+    # Give each group a relative volatility label.
     risk_labels = {
         cluster_order[0]: "Lower Volatility",
         cluster_order[1]: "Medium Volatility",
@@ -190,6 +216,7 @@ with ai_tab:
         "or predictions of future risk."
     )
 
+    # Turn the asset index into a column for plotting.
     plot_data = cluster_result.reset_index()
     plot_data = plot_data.rename(
         columns={plot_data.columns[0]: "Asset"}
@@ -207,6 +234,7 @@ with ai_tab:
 
     from sklearn.metrics import silhouette_score
 
+    # Measure cluster separation. This is not prediction accuracy.
     silhouette = silhouette_score(scaled_features, cluster_labels)
 
     st.subheader("Clustering Evaluation")
@@ -217,8 +245,11 @@ with ai_tab:
         "This score does not measure investment performance."
     )
 
+# 3. Build portfolios using the full historical dataset.
 with portfolio_tab:
+    # Estimate annual covariance to measure how asset returns move together.
     annual_covariance = all_returns.cov() * 252
+    # Estimate annual arithmetic returns from average daily returns.
     annual_returns = all_returns.mean() * 252
 
     with st.expander("View return estimates and covariance"):
@@ -243,11 +274,14 @@ with portfolio_tab:
         )
 
     asset_count = len(all_returns.columns)
+    # Give every asset the same weight for the benchmark.
     equal_weights = np.ones(asset_count) / asset_count
 
+    # Combine weights and covariance to calculate portfolio variance.
     portfolio_variance = (
         equal_weights @ annual_covariance.to_numpy() @ equal_weights
     )
+    # Take the square root of variance to get volatility.
     portfolio_volatility = np.sqrt(portfolio_variance)
 
     with st.expander("View equal-weight benchmark"):
@@ -260,16 +294,19 @@ with portfolio_tab:
             f"{portfolio_volatility:.2%}"
         )
 
+    # Return annual portfolio volatility for a given set of weights.
     def calculate_portfolio_volatility(weights):
         covariance = annual_covariance.to_numpy()
         variance = weights @ covariance @ weights
         return np.sqrt(variance)
 
 
+    # Check the risk function with the equal-weight portfolio.
     check_volatility = calculate_portfolio_volatility(equal_weights)
 
 
 
+    # Demo settings: a larger coefficient puts more weight on reducing risk.
     risk_aversion = {
         "Conservative": 20.0,
         "Balanced": 5.0,
@@ -277,6 +314,7 @@ with portfolio_tab:
     }
 
 
+    # Minimize the risk penalty minus estimated return.
     def portfolio_objective(weights):
         estimated_return = weights @ annual_returns.to_numpy()
         variance = weights @ annual_covariance.to_numpy() @ weights
@@ -284,13 +322,16 @@ with portfolio_tab:
         return penalty - estimated_return
 
 
+    # Require all portfolio weights to add up to 1 (100%).
     constraints = {
         "type": "eq",
         "fun": lambda weights: np.sum(weights) - 1
     }
 
+    # Do not allow short selling; limit each asset to 30%.
     bounds = [(0, 0.30)] * asset_count
 
+    # Search for weights that best match the selected preference.
     result = minimize(
         portfolio_objective,
         x0=equal_weights,
@@ -301,7 +342,9 @@ with portfolio_tab:
 
     st.subheader(f"{risk_preference} Portfolio (30% Asset Cap)")
 
+    # Show the allocation only if the optimizer succeeds.
     if result.success:
+        # Calculate volatility separately; the objective value is not volatility.
         optimized_volatility = calculate_portfolio_volatility(result.x)
         optimized_return = result.x @ annual_returns.to_numpy()
 
@@ -320,6 +363,7 @@ with portfolio_tab:
             f"{optimized_volatility:.2%}"
         )
 
+        # Convert weights to percentages and investment amounts in dollars.
         optimized_weights = pd.DataFrame({
             "Asset": all_returns.columns,
             "Weight (%)": result.x * 100,
@@ -345,6 +389,7 @@ with portfolio_tab:
             "Each asset is limited to a maximum weight of 30%."
         )
 
+        # Compare estimates using the same full dataset, not a separate test period.
         risk_comparison = pd.DataFrame({
             "Portfolio": [
                 "Equal Weight",
@@ -369,10 +414,12 @@ with portfolio_tab:
         )
     else:
         st.error(f"Optimization failed: {result.message}")
+    # Minimizing negative return is the same as maximizing return.
     def negative_portfolio_return(weights):
         return -(weights @ annual_returns.to_numpy())
 
 
+    # Find the highest estimated return allowed by the constraints.
     max_return_result = minimize(
         negative_portfolio_return,
         x0=equal_weights,
@@ -393,6 +440,7 @@ with portfolio_tab:
             )
         else:
             st.error(f"Calculation failed: {max_return_result.message}")
+        # Find the lowest-volatility portfolio for the frontier starting point.
         min_risk_result = minimize(
             calculate_portfolio_volatility,
             x0=equal_weights,
@@ -422,22 +470,27 @@ with portfolio_tab:
             st.error(f"Calculation failed: {min_risk_result.message}")
 
     if min_risk_result.success and max_return_result.success:
+        # Choose 20 return targets between the two frontier endpoints.
         target_returns = np.linspace(
             frontier_start_return, max_return, 20
         )
         frontier_rows = []
 
+        # Find the lowest volatility for each target return.
         for target in target_returns:
+            # Keep weights at 100% and require the current target return.
             frontier_constraints = [
                 {"type": "eq", "fun": lambda w: np.sum(w) - 1},
                 {
                     "type": "eq",
+                    # Save this loop target as the function default.
                     "fun": lambda w, target_value=target: (
                                                                   w @ annual_returns.to_numpy()
                                                           ) - target_value
                 }
             ]
 
+            # Optimize risk while meeting the target return and asset limits.
             frontier_result = minimize(
                 calculate_portfolio_volatility,
                 x0=equal_weights,
@@ -447,6 +500,7 @@ with portfolio_tab:
                 options={"maxiter": 1000, "ftol": 1e-9}
             )
 
+            # Keep only successful frontier calculations.
             if frontier_result.success:
                 frontier_rows.append({
                     "Annualized Volatility (%)":
@@ -478,7 +532,9 @@ with portfolio_tab:
                 "The curve connects 20 calculated portfolios using historical estimates."
             )
 
+# 4. Evaluate weights on a later period that was not used to fit them.
 with test_tab:
+    # Split returns in time order: first 70% for training, last 30% for testing.
     split_point = int(len(all_returns) * 0.7)
 
     train_returns = all_returns.iloc[:split_point]
@@ -502,16 +558,19 @@ with test_tab:
         "The first 70% of daily returns will be used to estimate portfolio weights. "
         "The remaining 30% will be reserved for evaluation."
     )
+    # Estimate returns and covariance using training data only.
     train_annual_returns = train_returns.mean() * 252
     train_covariance = train_returns.cov() * 252
 
 
+    # Use the same preference rule, but only training-period estimates.
     def training_objective(weights):
         estimated_return = weights @ train_annual_returns.to_numpy()
         variance = weights @ train_covariance.to_numpy() @ weights
         return risk_aversion[risk_preference] * variance - estimated_return
 
 
+    # Fit new weights without using test-period returns.
     train_result = minimize(
         training_objective,
         x0=equal_weights,
@@ -524,6 +583,7 @@ with test_tab:
         st.subheader("Portfolio Weights Estimated from Training Data")
 
         if train_result.success:
+            # List the weights fitted on the training period.
             training_weights = pd.DataFrame({
                 "Asset": train_returns.columns,
                 "Weight (%)": train_result.x * 100
@@ -541,11 +601,13 @@ with test_tab:
             st.error(f"Training optimization failed: {train_result.message}")
 
     if train_result.success:
+        # Apply weights to test returns, assuming daily rebalancing to fixed weights.
         test_portfolio_returns = pd.DataFrame({
             "Optimized": test_returns @ train_result.x,
             "Equal Weight": test_returns @ equal_weights
         })
 
+        # Compound daily returns to calculate growth from an initial value of 1.
         test_growth = (1 + test_portfolio_returns).cumprod()
 
         st.subheader("Out-of-Sample Portfolio Performance")
@@ -558,9 +620,12 @@ with test_tab:
             "Transaction costs and taxes are excluded."
         )
     if train_result.success:
+        # Track the highest value so far, including the initial value of 1.
         running_peak = test_growth.cummax().clip(lower=1.0)
+        # Measure the fall from each previous peak.
         drawdown = test_growth / running_peak - 1
 
+        # Compare test-period return, annualized volatility, and maximum loss from a peak.
         test_summary = pd.DataFrame({
             "Test Period Return (%)":
                 (test_growth.iloc[-1] - 1) * 100,
